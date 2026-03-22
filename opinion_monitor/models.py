@@ -26,3 +26,8 @@ class PipelineResult:
     data_file_path: Path
     report_file_path: Path
     email_sent: bool
+    searched_entity_count: int = 0
+    matched_entity_count: int = 0
+    skipped_entity_count: int = 0
+    failed_entity_count: int = 0
+    warnings: tuple[str, ...] = ()

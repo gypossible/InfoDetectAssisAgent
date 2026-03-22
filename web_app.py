@@ -153,10 +153,21 @@ HTML_TEMPLATE = """
         <p>{{ message }}</p>
         {% if result %}
           <ul>
-            <li>监测主体数：{{ result.entity_count }}</li>
+            <li>读取主体数：{{ result.entity_count }}</li>
+            <li>实际搜索主体数：{{ result.searched_entity_count }}</li>
+            <li>命中舆情主体数：{{ result.matched_entity_count }}</li>
+            <li>自动跳过主体数：{{ result.skipped_entity_count }}</li>
+            <li>搜索失败主体数：{{ result.failed_entity_count }}</li>
             <li>舆情条数：{{ result.article_count }}</li>
             <li>邮件是否发送成功：{{ "是" if result.email_sent else "否" }}</li>
           </ul>
+          {% if result.warnings %}
+            <ul>
+              {% for warning in result.warnings %}
+                <li>{{ warning }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
           <p class="path">原始数据：{{ result.data_file_path }}</p>
           <p class="path">分析报告：{{ result.report_file_path }}</p>
         {% endif %}

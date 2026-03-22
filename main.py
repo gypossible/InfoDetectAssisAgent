@@ -40,8 +40,12 @@ def main() -> None:
     excel_path = Path(args.excel_path).expanduser() if args.excel_path else None
     result = PublicOpinionPipeline(settings).run(excel_source=excel_path)
     logging.getLogger(__name__).info(
-        "单次任务执行成功：主体 %s 个，舆情 %s 条，数据文件 %s，报告文件 %s，邮件发送 %s",
+        "单次任务执行成功：读取主体 %s 个，实际搜索 %s 个，命中主体 %s 个，跳过主体 %s 个，搜索失败 %s 个，舆情 %s 条，数据文件 %s，报告文件 %s，邮件发送 %s",
         result.entity_count,
+        result.searched_entity_count,
+        result.matched_entity_count,
+        result.skipped_entity_count,
+        result.failed_entity_count,
         result.article_count,
         result.data_file_path,
         result.report_file_path,

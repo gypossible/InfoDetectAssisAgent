@@ -64,6 +64,7 @@ cp .env.example .env
 - `EXCEL_TARGET_COLUMN_LETTER`：默认 `B`，表示扫描各个 sheet 的 B 列
 - `SEARCH_PROVIDER`：默认 `tavily`，也支持 `duckduckgo`、`bing`、`serpapi`
 - `TAVILY_API_KEY`：Tavily 搜索 Key
+- `REQUEST_RETRY_ATTEMPTS` / `REQUEST_RETRY_BACKOFF_SECONDS`：搜索限流后的自动重试与退避配置
 - `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `LLM_MODEL`：大模型配置
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD`：发件邮箱 SMTP 配置
 - `EMAIL_RECIPIENTS`：收件人，默认已设置为 `liuguangyuan@natrust.cn`
@@ -118,6 +119,8 @@ python web_app.py
 
 - 上传一个单独的 Excel 工作簿作为本次监测名单
 - 系统自动读取所有 sheet 的 B 列主体名称
+- 系统会自动跳过明显像债券简称/代码的条目，例如 `20弋阳01`
+- 使用 Tavily 时，如命中限流或结果为空，会自动用 DuckDuckGo News 兜底
 - 如确需复用本地文件，可在辅助模式中明确选择一个已有 Excel 工作簿
 
 ### 免费公开部署模式（Streamlit）

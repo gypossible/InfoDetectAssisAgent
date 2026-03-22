@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 
@@ -72,8 +74,56 @@ def parse_published_at(raw_value: str, end_time: datetime) -> datetime | None:
 def is_within_time_window(raw_value: str, start_time: datetime, end_time: datetime) -> bool:
     parsed_time = parse_published_at(raw_value, end_time)
     if parsed_time is None:
-        return True
+        return False
     return start_time <= parsed_time <= end_time
+
+
+def _normalize_match_text(value: object) -> str:
+    text = _safe_text(value)
+    if not text:
+        return ""
+    normalized = (
+        text.replace("\u3000", "")
+        .replace("（", "")
+        .replace("）", "")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("【", "")
+        .replace("】", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("《", "")
+        .replace("》", "")
+        .replace('"', "")
+        .replace("'", "")
+    )
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized.casefold()
+
+
+def _contains_entity(entity_name: str, *values: object) -> bool:
+    target = _normalize_match_text(entity_name)
+    if not target:
+        return False
+    combined = "".join(_normalize_match_text(value) for value in values if _safe_text(value))
+    return target in combined
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    retryable_markers = (
+        "excessive requests",
+        "rate limit",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "connection",
+        "server error",
+        "502",
+        "503",
+        "504",
+    )
+    return any(marker in message for marker in retryable_markers)
 
 
 class BaseSearchClient(ABC):
@@ -145,6 +195,13 @@ class BingNewsSearchClient(BaseSearchClient):
             source = ""
             if providers and isinstance(providers[0], dict):
                 source = providers[0].get("name", "")
+            if not _contains_entity(
+                entity_name,
+                article.get("name"),
+                article.get("description"),
+                article.get("url"),
+            ):
+                continue
 
             items.append(
                 self._build_item(
@@ -192,6 +249,13 @@ class SerpApiSearchClient(BaseSearchClient):
             published_at = _safe_text(article.get("date"))
             if not is_within_time_window(published_at, start_time, end_time):
                 continue
+            if not _contains_entity(
+                entity_name,
+                article.get("title"),
+                article.get("snippet"),
+                article.get("link"),
+            ):
+                continue
 
             items.append(
                 self._build_item(
@@ -217,21 +281,33 @@ class DuckDuckGoNewsSearchClient(BaseSearchClient):
             )
 
         try:
-            ddgs = DDGS()
-            results = ddgs.news(
-                keywords=entity_name,
-                region=self.settings.ddg_region,
-                safesearch="off",
-                timelimit="d",
-                max_results=self.settings.max_results_per_entity,
-            ) or []
+            original_warn = warnings.warn
+            with warnings.catch_warnings():
+                warnings.warn = lambda *args, **kwargs: None
+                ddgs = DDGS()
+                results = ddgs.news(
+                    keywords=entity_name,
+                    region=self.settings.ddg_region,
+                    safesearch="off",
+                    timelimit="d",
+                    max_results=self.settings.max_results_per_entity,
+                ) or []
+            warnings.warn = original_warn
         except Exception as exc:
+            warnings.warn = original_warn
             raise SearchClientError(f"DuckDuckGo 搜索失败：{exc}") from exc
 
         items: list[NewsItem] = []
         for article in results:
             published_at = _safe_text(article.get("date"))
             if not is_within_time_window(published_at, start_time, end_time):
+                continue
+            if not _contains_entity(
+                entity_name,
+                article.get("title"),
+                article.get("body"),
+                article.get("url"),
+            ):
                 continue
 
             items.append(
@@ -258,32 +334,73 @@ class TavilyNewsSearchClient(BaseSearchClient):
         if not settings.tavily_api_key:
             raise SearchClientError("Tavily 未配置 TAVILY_API_KEY。")
         self.client = TavilyClient(api_key=settings.tavily_api_key)
+        self.fallback_client = DuckDuckGoNewsSearchClient(settings) if DDGS is not None else None
 
     def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
-        try:
-            response = self.client.search(
-                query=f'"{entity_name}" 相关新闻 舆情 风险 动态',
-                topic=self.settings.tavily_topic,
-                time_range=self.settings.tavily_time_range,
-                start_date=start_time.astimezone(timezone.utc).strftime("%Y-%m-%d"),
-                end_date=end_time.astimezone(timezone.utc).strftime("%Y-%m-%d"),
-                max_results=min(self.settings.max_results_per_entity, 20),
-                search_depth=self.settings.tavily_search_depth,
-                include_raw_content=self.settings.tavily_include_raw_content,
-                chunks_per_source=self.settings.tavily_chunks_per_source,
-                include_answer=False,
-                include_images=False,
-            )
-        except Exception as exc:
-            raise SearchClientError(f"Tavily 搜索失败：{exc}") from exc
+        request_kwargs = {
+            "query": entity_name,
+            "topic": self.settings.tavily_topic,
+            "max_results": min(self.settings.max_results_per_entity, 20),
+            "search_depth": self.settings.tavily_search_depth,
+            "include_raw_content": self.settings.tavily_include_raw_content,
+            "chunks_per_source": self.settings.tavily_chunks_per_source,
+            "include_answer": False,
+            "include_images": False,
+        }
+        if self.settings.tavily_time_range:
+            request_kwargs["time_range"] = self.settings.tavily_time_range
+        else:
+            request_kwargs["start_date"] = start_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            request_kwargs["end_date"] = end_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+        last_error: Exception | None = None
+        for attempt in range(self.settings.request_retry_attempts + 1):
+            try:
+                response = self.client.search(**request_kwargs)
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self.settings.request_retry_attempts or not _is_retryable_error(exc):
+                    if self.fallback_client is not None:
+                        logger.warning(
+                            "主体 %s 的 Tavily 搜索失败，改用 DuckDuckGo 兜底：%s",
+                            entity_name,
+                            exc,
+                        )
+                        return self.fallback_client.search(entity_name, start_time, end_time)
+                    raise SearchClientError(f"Tavily 搜索失败：{exc}") from exc
+
+                sleep_seconds = min(
+                    self.settings.request_retry_backoff_seconds * (2**attempt),
+                    self.settings.request_retry_backoff_max_seconds,
+                )
+                logger.warning(
+                    "Tavily 搜索触发限流或临时错误，主体 %s 将在 %.1f 秒后重试 [%s/%s]：%s",
+                    entity_name,
+                    sleep_seconds,
+                    attempt + 1,
+                    self.settings.request_retry_attempts,
+                    exc,
+                )
+                time.sleep(sleep_seconds)
+        else:
+            raise SearchClientError(f"Tavily 搜索失败：{last_error}")
 
         items: list[NewsItem] = []
         for article in response.get("results", []):
             published_at = _safe_text(article.get("published_date"))
-            if published_at and not is_within_time_window(published_at, start_time, end_time):
+            if not is_within_time_window(published_at, start_time, end_time):
                 continue
 
             snippet = _safe_text(article.get("content") or article.get("raw_content"))
+            if not _contains_entity(
+                entity_name,
+                article.get("title"),
+                snippet,
+                article.get("url"),
+            ):
+                continue
+
             source = self._extract_domain(article.get("url"))
             items.append(
                 self._build_item(
@@ -295,7 +412,11 @@ class TavilyNewsSearchClient(BaseSearchClient):
                     snippet=snippet,
                 )
             )
-        return items
+        if items or self.fallback_client is None:
+            return items
+
+        logger.info("主体 %s 在 Tavily 未命中有效结果，改用 DuckDuckGo 兜底。", entity_name)
+        return self.fallback_client.search(entity_name, start_time, end_time)
 
     @staticmethod
     def _extract_domain(url: object) -> str:

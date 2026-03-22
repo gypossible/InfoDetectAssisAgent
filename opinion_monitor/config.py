@@ -43,6 +43,11 @@ class Settings:
     search_provider: str = os.getenv("SEARCH_PROVIDER", "tavily").strip().lower()
     request_delay_seconds: float = float(os.getenv("REQUEST_DELAY_SECONDS", "1.5"))
     request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
+    request_retry_attempts: int = int(os.getenv("REQUEST_RETRY_ATTEMPTS", "3"))
+    request_retry_backoff_seconds: float = float(os.getenv("REQUEST_RETRY_BACKOFF_SECONDS", "3"))
+    request_retry_backoff_max_seconds: float = float(
+        os.getenv("REQUEST_RETRY_BACKOFF_MAX_SECONDS", "20")
+    )
     max_results_per_entity: int = int(os.getenv("MAX_RESULTS_PER_ENTITY", "10"))
     max_excel_files: int = int(os.getenv("MAX_EXCEL_FILES", "50"))
 

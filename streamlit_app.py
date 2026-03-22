@@ -75,10 +75,19 @@ result = st.session_state.run_result
 if result is not None:
     col1, col2, col3 = st.columns(3)
     col1.metric("监测主体数", result.entity_count)
-    col2.metric("舆情条数", result.article_count)
-    col3.metric("邮件发送", "成功" if result.email_sent else "失败")
+    col2.metric("实际搜索主体", result.searched_entity_count)
+    col3.metric("舆情条数", result.article_count)
+
+    extra_col1, extra_col2, extra_col3 = st.columns(3)
+    extra_col1.metric("命中主体", result.matched_entity_count)
+    extra_col2.metric("自动跳过主体", result.skipped_entity_count)
+    extra_col3.metric("搜索失败主体", result.failed_entity_count)
+
+    st.metric("邮件发送", "成功" if result.email_sent else "失败")
 
     st.success("分析完成，下面可以直接下载生成文件。")
+    for warning in result.warnings:
+        st.warning(warning)
     st.code(str(result.data_file_path), language="text")
     st.code(str(result.report_file_path), language="text")
 
