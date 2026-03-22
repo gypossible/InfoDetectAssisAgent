@@ -21,11 +21,11 @@ st.set_page_config(
 )
 
 st.title("自动化舆情监测与报告生成 Agent")
-st.caption("适合部署到 Streamlit Community Cloud 的免费公开入口。")
+st.caption("默认以上传单个 Excel 工作簿为主，适合部署到 Streamlit Community Cloud 的免费公开入口。")
 
 with st.sidebar:
     st.subheader("使用说明")
-    st.write("1. 上传一个 Excel 文件")
+    st.write("1. 上传一个 Excel 工作簿")
     st.write("2. 系统自动扫描所有 Sheet 的 B 列主体")
     st.write("3. 抓取近 24 小时舆情并生成报告")
     st.write("4. 即使邮件失败，也可以直接下载结果文件")
@@ -35,7 +35,7 @@ st.info("部署到云端前，请在平台 Secrets 中填写 Tavily、OpenAI 与
 uploaded_file = st.file_uploader(
     "上传监测 Excel 文件",
     type=["xlsx", "xlsm", "xltx", "xltm"],
-    help="系统会遍历所有 Sheet，并从 B 列提取主体名称。",
+    help="系统会遍历所有 Sheet，从 B 列提取主体名称，并自动跳过“主体名称”“主体”“发行人名称”等常见表头。",
 )
 
 

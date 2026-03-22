@@ -60,7 +60,7 @@ cp .env.example .env
 
 2. 修改 `.env` 中的关键参数：
 
-- `EXCEL_INPUT_PATH`：本地监测名单 Excel 文件或目录路径；默认读取 `~/Documents/舆情监测主体`
+- `EXCEL_INPUT_PATH`：本地辅助模式使用的 Excel 文件或目录路径；网页/Streamlit 默认仍以上传单个 Excel 为主
 - `EXCEL_TARGET_COLUMN_LETTER`：默认 `B`，表示扫描各个 sheet 的 B 列
 - `SEARCH_PROVIDER`：默认 `tavily`，也支持 `duckduckgo`、`bing`、`serpapi`
 - `TAVILY_API_KEY`：Tavily 搜索 Key
@@ -70,9 +70,8 @@ cp .env.example .env
 
 ## 4. Excel 格式要求
 
-系统会自动扫描：
+系统默认以**上传的单个 Excel 工作簿**作为监测名单来源，并自动扫描：
 
-- `EXCEL_INPUT_PATH` 指向的单个 Excel 文件，或目录下的全部 Excel 文件
 - 每个工作簿中的所有 Sheet
 - 每个 Sheet 的 `B` 列非空单元格
 
@@ -84,7 +83,8 @@ cp .env.example .env
 | 1 | 某品牌 |
 | 2 | 某机构 |
 
-程序会自动去重，并尽量跳过诸如“主体名称”“监测主体”之类的表头值。
+程序会自动全局去重，并自动跳过诸如 `主体名称`、`主体`、`发行人名称` 之类的常见表头值。
+本地固定路径和 `--excel-path` 仍可作为辅助入口使用，但不再作为网页主流程强调目录整体扫描。
 
 ## 5. 运行方式
 
@@ -94,7 +94,7 @@ cp .env.example .env
 python main.py
 ```
 
-如需临时指定 Excel 文件或目录：
+如需在命令行下使用本地辅助文件，可临时指定 Excel 文件或目录：
 
 ```bash
 python main.py --excel-path "/Users/guangyuan/Documents/舆情监测主体/某个名单.xlsx"
@@ -116,8 +116,9 @@ python web_app.py
 
 启动后访问 [http://127.0.0.1:7860](http://127.0.0.1:7860)，即可：
 
-- 直接选择 `Documents/舆情监测主体` 中已存在的 Excel
-- 或上传一个临时 Excel 文件执行本次监测
+- 上传一个单独的 Excel 工作簿作为本次监测名单
+- 系统自动读取所有 sheet 的 B 列主体名称
+- 如确需复用本地文件，可在辅助模式中明确选择一个已有 Excel 工作簿
 
 ### 免费公开部署模式（Streamlit）
 
@@ -143,6 +144,7 @@ streamlit run streamlit_app.py
 - Branch: `main`
 - Main file path: `streamlit_app.py`
 - Secrets: 将 [.streamlit/secrets.example.toml](/Users/guangyuan/Documents/重点主题舆情监测定时任务/.streamlit/secrets.example.toml) 的内容复制到 Streamlit 的 Secrets 配置框中，再填入真实密钥
+- 使用方式：默认上传一个 Excel 工作簿，系统自动扫描所有 sheet 的 B 列
 
 ## 6.1 公开部署
 

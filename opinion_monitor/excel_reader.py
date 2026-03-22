@@ -18,10 +18,14 @@ class ExcelWatchlistReader:
         "主体名称",
         "主体",
         "监测主体",
+        "发行人名称",
+        "发行人",
         "公司名称",
         "名称",
         "name",
+        "issuer",
     }
+    NORMALIZED_HEADER_CANDIDATES = {header.casefold() for header in HEADER_CANDIDATES}
 
     def __init__(self, input_path: Path, target_column_letter: str = "B") -> None:
         self.input_path = input_path
@@ -40,7 +44,9 @@ class ExcelWatchlistReader:
         unique_entities = list(dict.fromkeys(entities))
 
         if not unique_entities:
-            raise ExcelReaderError("未在 Excel 的 B 列中读取到有效主体名称，请检查文件内容。")
+            raise ExcelReaderError(
+                f"未在各 sheet 的 {self.target_column_letter} 列中读取到有效主体名称，请检查文件内容。"
+            )
 
         logger.info(
             "已从 %s 个 Excel 文件中读取到 %s 个待监测主体。",
@@ -94,9 +100,9 @@ class ExcelWatchlistReader:
     def _normalize_entity(self, value: object) -> str:
         if value is None:
             return ""
-        entity = str(value).strip()
+        entity = str(value).replace("\u3000", " ").strip()
         if not entity:
             return ""
-        if entity.lower() in self.HEADER_CANDIDATES:
+        if entity.casefold() in self.NORMALIZED_HEADER_CANDIDATES:
             return ""
         return entity

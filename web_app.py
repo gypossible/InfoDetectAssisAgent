@@ -114,31 +114,35 @@ HTML_TEMPLATE = """
   <div class="wrap">
     <section class="hero">
       <h1>自动化舆情监测 Agent</h1>
-      <p>支持两种方式：直接读取你本机 <strong>Documents/舆情监测主体</strong> 目录中的 Excel，或临时上传一个 Excel 文件执行本次监测。系统会自动扫描每个工作簿所有 sheet 的 B 列主体名称。</p>
-      <p class="path">默认本地目录：{{ default_input_path }}</p>
+      <p>推荐方式是直接上传一个 Excel 工作簿执行本次监测。系统会自动扫描该工作簿所有 sheet 的 B 列主体名称，并自动跳过“主体名称”“主体”“发行人名称”等常见表头。</p>
+      <p class="path">辅助本地路径：{{ default_input_path }}</p>
     </section>
 
     <div class="grid">
       <section class="card">
-        <h3>方式一：选择本地 Excel</h3>
-        <form method="post" action="{{ url_for('run_pipeline') }}">
-          <label for="existing_file">检测到的本地 Excel</label>
-          <select name="existing_file" id="existing_file">
-            <option value="">使用默认目录整体扫描</option>
-            {% for file_path in excel_files %}
-              <option value="{{ file_path }}">{{ file_path }}</option>
-            {% endfor %}
-          </select>
-          <button type="submit">开始监测</button>
+        <h3>推荐方式：上传 Excel</h3>
+        <form method="post" action="{{ url_for('run_pipeline') }}" enctype="multipart/form-data">
+          <label for="upload_file">上传 Excel 文件</label>
+          <input type="file" name="upload_file" id="upload_file" accept=".xlsx,.xlsm,.xltx,.xltm" required>
+          <button type="submit">上传并执行</button>
         </form>
       </section>
 
       <section class="card">
-        <h3>方式二：上传 Excel</h3>
-        <form method="post" action="{{ url_for('run_pipeline') }}" enctype="multipart/form-data">
-          <label for="upload_file">上传 Excel 文件</label>
-          <input type="file" name="upload_file" id="upload_file" accept=".xlsx,.xlsm,.xltx,.xltm">
-          <button type="submit">上传并执行</button>
+        <h3>辅助方式：本地已有 Excel</h3>
+        <p>如需复用本机已有文件，可从下方明确选择一个 Excel 工作簿执行；此入口不再默认整目录扫描。</p>
+        <form method="post" action="{{ url_for('run_pipeline') }}">
+          <label for="existing_file">检测到的本地 Excel</label>
+          {% if not excel_files %}
+            <p>当前辅助路径下未检测到可用 Excel 文件，请优先使用上传方式。</p>
+          {% endif %}
+          <select name="existing_file" id="existing_file" required>
+            <option value="" selected disabled>请选择一个本地 Excel 文件</option>
+            {% for file_path in excel_files %}
+              <option value="{{ file_path }}">{{ file_path }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" {% if not excel_files %}disabled{% endif %}>使用本地 Excel 执行</button>
         </form>
       </section>
     </div>
@@ -211,6 +215,8 @@ def run_pipeline():
             uploaded_file.save(selected_path)
         elif existing_file:
             selected_path = Path(existing_file)
+        else:
+            raise ValueError("请上传一个 Excel 文件，或在辅助模式下明确选择一个本地 Excel 文件。")
 
         result = PublicOpinionPipeline(settings).run(excel_source=selected_path)
         message_title = "执行完成"
