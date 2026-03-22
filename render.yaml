@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: public-opinion-monitor-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: EXCEL_INPUT_PATH
+        value: /opt/render/project/src/data/uploads
+      - key: EXCEL_UPLOAD_DIR
+        value: /opt/render/project/src/data/uploads
+      - key: EXCEL_TARGET_COLUMN_LETTER
+        value: B
+      - key: SEARCH_PROVIDER
+        value: tavily
+      - key: REQUEST_DELAY_SECONDS
+        value: "1.5"
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: "20"
+      - key: MAX_RESULTS_PER_ENTITY
+        value: "10"
+      - key: MAX_EXCEL_FILES
+        value: "50"
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        value: gpt-4o
+      - key: LLM_MAX_ARTICLES_FOR_PROMPT
+        value: "50"
+      - key: EMAIL_SUMMARY_CHAR_LIMIT
+        value: "220"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_SENDER
+        sync: false
+      - key: SMTP_USE_SSL
+        value: "true"
+      - key: EMAIL_RECIPIENTS
+        value: liuguangyuan@natrust.cn
+      - key: SCHEDULE_TIME
+        value: "07:30"
