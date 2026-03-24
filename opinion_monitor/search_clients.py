@@ -6,6 +6,7 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import pandas as pd
 import requests
@@ -166,6 +167,67 @@ def _tavily_time_range(lookback_days: int, configured_value: str) -> str | None:
     if lookback_days <= 366:
         return "year"
     return configured_value or None
+
+
+def _normalize_domain(value: object) -> str:
+    text = _safe_text(value).lower().strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = f"https://{text}"
+    parsed = urlparse(text)
+    hostname = (parsed.hostname or "").lower()
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    return hostname
+
+
+def _matches_domain(hostname: str, candidate: str) -> bool:
+    normalized_candidate = _normalize_domain(candidate)
+    if not hostname or not normalized_candidate:
+        return False
+    return hostname == normalized_candidate or hostname.endswith(f".{normalized_candidate}")
+
+
+def _is_mainland_domain(hostname: str, settings: Settings) -> bool:
+    if not hostname:
+        return False
+    if any(_matches_domain(hostname, domain) for domain in settings.mainland_source_domains):
+        return True
+    mainland_suffixes = (".gov.cn", ".com.cn", ".net.cn", ".org.cn", ".cn")
+    return hostname.endswith(mainland_suffixes)
+
+
+def _is_mainland_news_item(item: NewsItem, settings: Settings) -> bool:
+    return _is_mainland_domain(_normalize_domain(item.url or item.source), settings)
+
+
+def _sort_mainland_first(items: list[NewsItem], settings: Settings) -> list[NewsItem]:
+    return sorted(
+        items,
+        key=lambda item: (
+            not _is_mainland_news_item(item, settings),
+            item.published_at,
+            item.title,
+        ),
+        reverse=False,
+    )
+
+
+def _dedupe_news_items(items: list[NewsItem]) -> list[NewsItem]:
+    unique_items: list[NewsItem] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in items:
+        dedupe_key = (
+            item.entity_name.strip().casefold(),
+            item.title.strip().casefold(),
+            item.url.strip().casefold(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        unique_items.append(item)
+    return unique_items
 
 
 class BaseSearchClient(ABC):
@@ -370,7 +432,9 @@ class DuckDuckGoNewsSearchClient(BaseSearchClient):
                     snippet=article.get("body"),
                 )
             )
-
+        items = _sort_mainland_first(items, self.settings)
+        if self.settings.mainland_source_mode == "only":
+            return [item for item in items if _is_mainland_news_item(item, self.settings)]
         return items
 
 
@@ -386,42 +450,14 @@ class TavilyNewsSearchClient(BaseSearchClient):
         self.client = TavilyClient(api_key=settings.tavily_api_key)
         self.fallback_client = DuckDuckGoNewsSearchClient(settings) if DDGS is not None else None
 
-    def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
-        request_kwargs = {
-            "query": entity_name,
-            "topic": self.settings.tavily_topic,
-            "max_results": min(self.settings.max_results_per_entity, 20),
-            "search_depth": self.settings.tavily_search_depth,
-            "include_raw_content": self.settings.tavily_include_raw_content,
-            "chunks_per_source": self.settings.tavily_chunks_per_source,
-            "include_answer": False,
-            "include_images": False,
-        }
-        tavily_time_range = _tavily_time_range(
-            self.settings.search_lookback_days,
-            self.settings.tavily_time_range,
-        )
-        if tavily_time_range:
-            request_kwargs["time_range"] = tavily_time_range
-        else:
-            request_kwargs["start_date"] = start_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
-            request_kwargs["end_date"] = end_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
-
+    def _request_tavily(self, entity_name: str, request_kwargs: dict[str, object]) -> dict:
         last_error: Exception | None = None
         for attempt in range(self.settings.request_retry_attempts + 1):
             try:
-                response = self.client.search(**request_kwargs)
-                break
+                return self.client.search(**request_kwargs)
             except Exception as exc:
                 last_error = exc
                 if attempt >= self.settings.request_retry_attempts or not _is_retryable_error(exc):
-                    if self.fallback_client is not None:
-                        logger.warning(
-                            "主体 %s 的 Tavily 搜索失败，改用 DuckDuckGo 兜底：%s",
-                            entity_name,
-                            exc,
-                        )
-                        return self.fallback_client.search(entity_name, start_time, end_time)
                     raise SearchClientError(f"Tavily 搜索失败：{exc}") from exc
 
                 sleep_seconds = min(
@@ -437,9 +473,15 @@ class TavilyNewsSearchClient(BaseSearchClient):
                     exc,
                 )
                 time.sleep(sleep_seconds)
-        else:
-            raise SearchClientError(f"Tavily 搜索失败：{last_error}")
+        raise SearchClientError(f"Tavily 搜索失败：{last_error}")
 
+    def _build_items_from_response(
+        self,
+        entity_name: str,
+        response: dict,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[NewsItem]:
         items: list[NewsItem] = []
         for article in response.get("results", []):
             published_at = _safe_text(article.get("published_date"))
@@ -466,11 +508,92 @@ class TavilyNewsSearchClient(BaseSearchClient):
                     snippet=snippet,
                 )
             )
+        return items
+
+    def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
+        request_kwargs = {
+            "query": entity_name,
+            "topic": self.settings.tavily_topic,
+            "max_results": min(self.settings.max_results_per_entity, 20),
+            "search_depth": self.settings.tavily_search_depth,
+            "include_raw_content": self.settings.tavily_include_raw_content,
+            "chunks_per_source": self.settings.tavily_chunks_per_source,
+            "include_answer": False,
+            "include_images": False,
+        }
+        tavily_time_range = _tavily_time_range(
+            self.settings.search_lookback_days,
+            self.settings.tavily_time_range,
+        )
+        if tavily_time_range:
+            request_kwargs["time_range"] = tavily_time_range
+        else:
+            request_kwargs["start_date"] = start_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            request_kwargs["end_date"] = end_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+        for attempt in range(self.settings.request_retry_attempts + 1):
+            try:
+                response = self.client.search(**request_kwargs)
+                break
+            except Exception as exc:
+                if attempt >= self.settings.request_retry_attempts or not _is_retryable_error(exc):
+                    if self.fallback_client is not None:
+                        logger.warning(
+                            "主体 %s 的 Tavily 搜索失败，改用 DuckDuckGo 兜底：%s",
+                            entity_name,
+                            exc,
+                        )
+                        fallback_items = self.fallback_client.search(entity_name, start_time, end_time)
+                        if self.settings.mainland_source_mode == "only":
+                            return [
+                                item for item in fallback_items if _is_mainland_news_item(item, self.settings)
+                            ]
+                        return fallback_items
+                    raise SearchClientError(f"Tavily 搜索失败：{exc}") from exc
+
+                sleep_seconds = min(
+                    self.settings.request_retry_backoff_seconds * (2**attempt),
+                    self.settings.request_retry_backoff_max_seconds,
+                )
+                logger.warning(
+                    "Tavily 搜索触发限流或临时错误，主体 %s 将在 %.1f 秒后重试 [%s/%s]：%s",
+                    entity_name,
+                    sleep_seconds,
+                    attempt + 1,
+                    self.settings.request_retry_attempts,
+                    exc,
+                )
+                time.sleep(sleep_seconds)
+
+        items = self._build_items_from_response(entity_name, response, start_time, end_time)
+
+        if self.settings.mainland_source_mode in {"prefer", "only"}:
+            mainland_items = [item for item in items if _is_mainland_news_item(item, self.settings)]
+            needs_cn_top_up = self.settings.mainland_source_mode == "only" or not mainland_items
+            if needs_cn_top_up and self.settings.mainland_source_domains:
+                cn_kwargs = dict(request_kwargs)
+                cn_kwargs["include_domains"] = self.settings.mainland_source_domains[:20]
+                try:
+                    cn_response = self._request_tavily(entity_name, cn_kwargs)
+                    cn_items = self._build_items_from_response(entity_name, cn_response, start_time, end_time)
+                    items = _dedupe_news_items(cn_items + items)
+                except SearchClientError as exc:
+                    logger.warning("主体 %s 的中国大陆站点补充搜索失败：%s", entity_name, exc)
+
+            items = _sort_mainland_first(items, self.settings)
+            if self.settings.mainland_source_mode == "only":
+                items = [item for item in items if _is_mainland_news_item(item, self.settings)]
+
         if items or self.fallback_client is None:
-            return items
+            return items[: self.settings.max_results_per_entity]
 
         logger.info("主体 %s 在 Tavily 未命中有效结果，改用 DuckDuckGo 兜底。", entity_name)
-        return self.fallback_client.search(entity_name, start_time, end_time)
+        fallback_items = self.fallback_client.search(entity_name, start_time, end_time)
+        if self.settings.mainland_source_mode == "only":
+            fallback_items = [item for item in fallback_items if _is_mainland_news_item(item, self.settings)]
+        elif self.settings.mainland_source_mode == "prefer":
+            fallback_items = _sort_mainland_first(fallback_items, self.settings)
+        return fallback_items[: self.settings.max_results_per_entity]
 
     @staticmethod
     def _extract_domain(url: object) -> str:

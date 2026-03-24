@@ -28,7 +28,8 @@ with st.sidebar:
     st.write("1. 上传一个 Excel 工作簿")
     st.write("2. 系统自动扫描所有 Sheet 的 B 列主体")
     st.write("3. 抓取过去一年的舆情并生成报告")
-    st.write("4. 即使邮件失败，也可以直接下载结果文件")
+    st.write("4. 默认优先中国大陆公开新闻与公告站点")
+    st.write("5. 即使邮件失败，也可以直接下载结果文件")
 
 st.info("部署到云端前，请在平台 Secrets 中填写 Tavily、OpenAI 与 SMTP 配置。")
 

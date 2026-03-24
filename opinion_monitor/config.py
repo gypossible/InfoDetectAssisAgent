@@ -21,6 +21,40 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+DEFAULT_MAINLAND_SOURCE_DOMAINS = ",".join(
+    [
+        "people.com.cn",
+        "xinhuanet.com",
+        "cctv.com",
+        "chinanews.com.cn",
+        "china.com.cn",
+        "gmw.cn",
+        "cnr.cn",
+        "thepaper.cn",
+        "caixin.com",
+        "yicai.com",
+        "21jingji.com",
+        "nbd.com.cn",
+        "eastmoney.com",
+        "10jqka.com.cn",
+        "cnstock.com",
+        "stcn.com",
+        "cs.com.cn",
+        "cls.cn",
+        "jrj.com.cn",
+        "finance.sina.com.cn",
+        "finance.ifeng.com",
+        "qq.com",
+        "163.com",
+        "sohu.com",
+        "gov.cn",
+        "csrc.gov.cn",
+        "sse.com.cn",
+        "szse.cn",
+    ]
+)
+
+
 @dataclass(slots=True)
 class Settings:
     project_root: Path = PROJECT_ROOT
@@ -42,6 +76,11 @@ class Settings:
 
     search_provider: str = os.getenv("SEARCH_PROVIDER", "tavily").strip().lower()
     search_lookback_days: int = int(os.getenv("SEARCH_LOOKBACK_DAYS", "365"))
+    mainland_source_mode: str = os.getenv("MAINLAND_SOURCE_MODE", "prefer").strip().lower()
+    mainland_source_domains_raw: str = os.getenv(
+        "MAINLAND_SOURCE_DOMAINS",
+        DEFAULT_MAINLAND_SOURCE_DOMAINS,
+    )
     request_delay_seconds: float = float(os.getenv("REQUEST_DELAY_SECONDS", "1.5"))
     request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
     request_retry_attempts: int = int(os.getenv("REQUEST_RETRY_ATTEMPTS", "3"))
@@ -97,6 +136,10 @@ class Settings:
     @property
     def email_recipients(self) -> list[str]:
         return _split_csv(self.email_recipients_raw)
+
+    @property
+    def mainland_source_domains(self) -> list[str]:
+        return [item.lower() for item in _split_csv(self.mainland_source_domains_raw)]
 
     @property
     def formatted_run_date(self) -> str:
