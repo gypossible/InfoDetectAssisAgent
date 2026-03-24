@@ -126,6 +126,48 @@ def _is_retryable_error(exc: Exception) -> bool:
     return any(marker in message for marker in retryable_markers)
 
 
+def _bing_freshness(lookback_days: int) -> str | None:
+    if lookback_days <= 1:
+        return "Day"
+    if lookback_days <= 7:
+        return "Week"
+    if lookback_days <= 31:
+        return "Month"
+    return None
+
+
+def _serpapi_tbs(lookback_days: int) -> str | None:
+    if lookback_days <= 1:
+        return "qdr:d"
+    if lookback_days <= 7:
+        return "qdr:w"
+    if lookback_days <= 31:
+        return "qdr:m"
+    return None
+
+
+def _ddg_timelimit(lookback_days: int) -> str | None:
+    if lookback_days <= 1:
+        return "d"
+    if lookback_days <= 7:
+        return "w"
+    if lookback_days <= 31:
+        return "m"
+    return None
+
+
+def _tavily_time_range(lookback_days: int, configured_value: str) -> str | None:
+    if lookback_days <= 1:
+        return "day"
+    if lookback_days <= 7:
+        return "week"
+    if lookback_days <= 31:
+        return "month"
+    if lookback_days <= 366:
+        return "year"
+    return configured_value or None
+
+
 class BaseSearchClient(ABC):
     provider_name = "base"
 
@@ -165,19 +207,23 @@ class BingNewsSearchClient(BaseSearchClient):
         if not self.settings.bing_subscription_key:
             raise SearchClientError("Bing News Search 未配置 BING_SUBSCRIPTION_KEY。")
 
+        params = {
+            "q": entity_name,
+            "count": self.settings.max_results_per_entity,
+            "sortBy": "Date",
+            "mkt": self.settings.bing_market,
+            "safeSearch": "Off",
+            "textFormat": "Raw",
+        }
+        freshness = _bing_freshness(self.settings.search_lookback_days)
+        if freshness:
+            params["freshness"] = freshness
+
         try:
             response = self.session.get(
                 self.settings.bing_endpoint,
                 headers={"Ocp-Apim-Subscription-Key": self.settings.bing_subscription_key},
-                params={
-                    "q": entity_name,
-                    "count": self.settings.max_results_per_entity,
-                    "freshness": "Day",
-                    "sortBy": "Date",
-                    "mkt": self.settings.bing_market,
-                    "safeSearch": "Off",
-                    "textFormat": "Raw",
-                },
+                params=params,
                 timeout=self.settings.request_timeout_seconds,
             )
             response.raise_for_status()
@@ -224,19 +270,23 @@ class SerpApiSearchClient(BaseSearchClient):
         if not self.settings.serpapi_api_key:
             raise SearchClientError("SerpAPI 未配置 SERPAPI_API_KEY。")
 
+        params = {
+            "engine": "google",
+            "q": entity_name,
+            "tbm": "nws",
+            "api_key": self.settings.serpapi_api_key,
+            "num": self.settings.max_results_per_entity,
+            "gl": self.settings.serpapi_gl,
+            "hl": self.settings.serpapi_hl,
+        }
+        tbs = _serpapi_tbs(self.settings.search_lookback_days)
+        if tbs:
+            params["tbs"] = tbs
+
         try:
             response = self.session.get(
                 self.settings.serpapi_endpoint,
-                params={
-                    "engine": "google",
-                    "q": entity_name,
-                    "tbm": "nws",
-                    "api_key": self.settings.serpapi_api_key,
-                    "num": self.settings.max_results_per_entity,
-                    "tbs": "qdr:d",
-                    "gl": self.settings.serpapi_gl,
-                    "hl": self.settings.serpapi_hl,
-                },
+                params=params,
                 timeout=self.settings.request_timeout_seconds,
             )
             response.raise_for_status()
@@ -289,7 +339,7 @@ class DuckDuckGoNewsSearchClient(BaseSearchClient):
                     keywords=entity_name,
                     region=self.settings.ddg_region,
                     safesearch="off",
-                    timelimit="d",
+                    timelimit=_ddg_timelimit(self.settings.search_lookback_days),
                     max_results=self.settings.max_results_per_entity,
                 ) or []
             warnings.warn = original_warn
@@ -347,8 +397,12 @@ class TavilyNewsSearchClient(BaseSearchClient):
             "include_answer": False,
             "include_images": False,
         }
-        if self.settings.tavily_time_range:
-            request_kwargs["time_range"] = self.settings.tavily_time_range
+        tavily_time_range = _tavily_time_range(
+            self.settings.search_lookback_days,
+            self.settings.tavily_time_range,
+        )
+        if tavily_time_range:
+            request_kwargs["time_range"] = tavily_time_range
         else:
             request_kwargs["start_date"] = start_time.astimezone(timezone.utc).strftime("%Y-%m-%d")
             request_kwargs["end_date"] = end_time.astimezone(timezone.utc).strftime("%Y-%m-%d")

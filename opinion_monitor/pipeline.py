@@ -25,7 +25,7 @@ class PublicOpinionPipeline:
     def run(self, excel_source: Path | None = None) -> PipelineResult:
         run_time = datetime.now().astimezone()
         end_time = run_time.astimezone(timezone.utc)
-        start_time = end_time - timedelta(hours=24)
+        start_time = end_time - timedelta(days=self.settings.search_lookback_days)
         output_dir = self.settings.build_run_output_dir(run_time)
         input_path = excel_source or self.settings.excel_input_path
 

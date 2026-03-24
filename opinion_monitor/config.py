@@ -41,6 +41,7 @@ class Settings:
     ).strip().upper()  # TODO: 如需更换监测列，请在这里填入 Excel 列字母
 
     search_provider: str = os.getenv("SEARCH_PROVIDER", "tavily").strip().lower()
+    search_lookback_days: int = int(os.getenv("SEARCH_LOOKBACK_DAYS", "365"))
     request_delay_seconds: float = float(os.getenv("REQUEST_DELAY_SECONDS", "1.5"))
     request_timeout_seconds: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))
     request_retry_attempts: int = int(os.getenv("REQUEST_RETRY_ATTEMPTS", "3"))
@@ -67,7 +68,7 @@ class Settings:
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")  # TODO: 请在这里填入 Tavily API Key
     tavily_topic: str = os.getenv("TAVILY_TOPIC", "news").strip().lower()
     tavily_search_depth: str = os.getenv("TAVILY_SEARCH_DEPTH", "advanced").strip().lower()
-    tavily_time_range: str = os.getenv("TAVILY_TIME_RANGE", "day").strip().lower()
+    tavily_time_range: str = os.getenv("TAVILY_TIME_RANGE", "year").strip().lower()
     tavily_include_raw_content: str = os.getenv(
         "TAVILY_INCLUDE_RAW_CONTENT", "markdown"
     ).strip().lower()
