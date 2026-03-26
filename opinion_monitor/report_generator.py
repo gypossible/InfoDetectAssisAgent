@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from openai import OpenAI
+import requests
 
 from .config import Settings
 
@@ -43,16 +43,8 @@ def extract_core_summary(report_markdown: str, max_chars: int = 220) -> str:
 class LLMReportGenerator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.client: OpenAI | None = None
-        if settings.openai_api_key:
-            client_kwargs: dict[str, str] = {"api_key": settings.openai_api_key}
-            if settings.openai_base_url:
-                if not settings.openai_base_url.startswith(("http://", "https://")):
-                    raise ReportGenerationError(
-                        "OPENAI_BASE_URL 配置不合法，必须以 http:// 或 https:// 开头。"
-                    )
-                client_kwargs["base_url"] = settings.openai_base_url
-            self.client = OpenAI(**client_kwargs)
+        self.base_url = self._normalize_base_url(settings.openai_base_url)
+        self.session = requests.Session()
 
     def generate_report(
         self,
@@ -65,7 +57,7 @@ class LLMReportGenerator:
         if dataframe.empty:
             report_markdown = self._build_empty_report(run_time, start_time, end_time)
         else:
-            if self.client is None:
+            if not self.settings.openai_api_key:
                 raise ReportGenerationError("未配置 OPENAI_API_KEY，无法生成 AI 舆情分析报告。")
             report_markdown = self._generate_with_llm(dataframe, run_time, start_time, end_time)
 
@@ -84,7 +76,6 @@ class LLMReportGenerator:
         start_time: datetime,
         end_time: datetime,
     ) -> str:
-        assert self.client is not None
         context = self._build_context(dataframe, run_time, start_time, end_time)
 
         instructions = (
@@ -125,21 +116,45 @@ class LLMReportGenerator:
         return first_pass
 
     def _request_report(self, instructions: str, user_input: str) -> str:
-        assert self.client is not None
-        response = self.client.responses.create(
-            model=self.settings.llm_model,
-            instructions=instructions,
-            input=user_input,
-        )
+        payload = {
+            "model": self.settings.llm_model,
+            "instructions": instructions,
+            "input": user_input,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.settings.openai_api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
 
-        output_text = getattr(response, "output_text", "") or ""
-        if output_text.strip():
-            return output_text.strip()
+        try:
+            response = self.session.post(
+                f"{self.base_url}/responses",
+                headers=headers,
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                timeout=180,
+            )
+        except requests.RequestException as exc:
+            raise ReportGenerationError(f"调用大模型接口失败：{exc}") from exc
+
+        if not response.ok:
+            error_text = response.text.strip()
+            raise ReportGenerationError(
+                f"大模型接口返回异常（HTTP {response.status_code}）：{error_text[:500]}"
+            )
+
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ReportGenerationError("大模型接口返回的不是合法 JSON。") from exc
+
+        output_text = str(response_payload.get("output_text") or "").strip()
+        if output_text:
+            return output_text
 
         text_fragments: list[str] = []
-        for item in getattr(response, "output", []) or []:
-            for content in getattr(item, "content", []) or []:
-                text_value = getattr(content, "text", None)
+        for item in response_payload.get("output", []) or []:
+            for content in item.get("content", []) or []:
+                text_value = content.get("text")
                 if text_value:
                     text_fragments.append(str(text_value).strip())
 
@@ -147,6 +162,15 @@ class LLMReportGenerator:
         if not report_text:
             raise ReportGenerationError("模型返回为空，无法生成舆情分析报告。")
         return report_text
+
+    @staticmethod
+    def _normalize_base_url(raw_base_url: str) -> str:
+        base_url = (raw_base_url or "").strip()
+        if not base_url:
+            return "https://api.openai.com/v1"
+        if not base_url.startswith(("http://", "https://")):
+            raise ReportGenerationError("OPENAI_BASE_URL 配置不合法，必须以 http:// 或 https:// 开头。")
+        return base_url.rstrip("/")
 
     @staticmethod
     def _needs_retry(report_markdown: str) -> bool:
