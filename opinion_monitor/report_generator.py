@@ -43,6 +43,7 @@ def extract_core_summary(report_markdown: str, max_chars: int = 220) -> str:
 class LLMReportGenerator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._validate_transport_settings()
         self.base_url = self._normalize_base_url(settings.openai_base_url)
         self.session = requests.Session()
 
@@ -216,6 +217,23 @@ class LLMReportGenerator:
     def _uses_chat_completions_api(self) -> bool:
         model_name = (self.settings.llm_model or "").strip().lower()
         return "deepseek" in self.base_url.lower() or model_name.startswith("deepseek-")
+
+    def _validate_transport_settings(self) -> None:
+        if self.settings.openai_api_key:
+            self._ensure_ascii("OPENAI_API_KEY", self.settings.openai_api_key)
+        if self.settings.openai_base_url:
+            self._ensure_ascii("OPENAI_BASE_URL", self.settings.openai_base_url)
+        if self.settings.llm_model:
+            self._ensure_ascii("LLM_MODEL", self.settings.llm_model)
+
+    @staticmethod
+    def _ensure_ascii(field_name: str, value: str) -> None:
+        try:
+            value.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ReportGenerationError(
+                f"{field_name} 包含非 ASCII 字符，请检查是否仍保留了中文占位内容或中文引号。"
+            ) from exc
 
     @staticmethod
     def _normalize_base_url(raw_base_url: str) -> str:
