@@ -54,6 +54,8 @@ class EmailDispatcher:
         for attachment_path in attachments:
             self._attach_file(message, attachment_path)
 
+        payload = message.as_bytes()
+
         if self.settings.smtp_use_ssl:
             with smtplib.SMTP_SSL(
                 self.settings.smtp_host,
@@ -64,7 +66,7 @@ class EmailDispatcher:
                 server.sendmail(
                     self.settings.smtp_sender,
                     self.settings.email_recipients,
-                    message.as_string(),
+                    payload,
                 )
         else:
             with smtplib.SMTP(
@@ -77,7 +79,7 @@ class EmailDispatcher:
                 server.sendmail(
                     self.settings.smtp_sender,
                     self.settings.email_recipients,
-                    message.as_string(),
+                    payload,
                 )
 
         logger.info("邮件发送成功，收件人：%s", ", ".join(self.settings.email_recipients))

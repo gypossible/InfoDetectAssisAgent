@@ -47,6 +47,10 @@ class LLMReportGenerator:
         if settings.openai_api_key:
             client_kwargs: dict[str, str] = {"api_key": settings.openai_api_key}
             if settings.openai_base_url:
+                if not settings.openai_base_url.startswith(("http://", "https://")):
+                    raise ReportGenerationError(
+                        "OPENAI_BASE_URL 配置不合法，必须以 http:// 或 https:// 开头。"
+                    )
                 client_kwargs["base_url"] = settings.openai_base_url
             self.client = OpenAI(**client_kwargs)
 
