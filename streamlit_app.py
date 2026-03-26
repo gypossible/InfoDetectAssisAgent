@@ -9,10 +9,12 @@ import streamlit as st
 from opinion_monitor.config import Settings
 from opinion_monitor.logging_utils import setup_logging
 from opinion_monitor.pipeline import PublicOpinionPipeline
+from opinion_monitor.runtime_info import get_app_version
 
 settings = Settings()
 settings.ensure_directories()
 setup_logging(settings.log_dir)
+APP_VERSION = get_app_version(settings.project_root)
 
 st.set_page_config(
     page_title="舆情监测 Agent",
@@ -67,7 +69,7 @@ if st.button("开始分析", type="primary", disabled=uploaded_file is None):
                     excel_source=excel_path
                 )
             except Exception as exc:
-                st.session_state.run_error = str(exc)
+                st.session_state.run_error = f"{type(exc).__name__}: {exc}"
 
 if st.session_state.run_error:
     st.error(f"执行失败：{st.session_state.run_error}")
@@ -113,5 +115,5 @@ if result is not None:
 
 st.divider()
 st.markdown(
-    f"默认搜索源：`{settings.search_provider}`  |  时间：`{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"
+    f"默认搜索源：`{settings.search_provider}`  |  版本：`{APP_VERSION}`  |  时间：`{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"
 )

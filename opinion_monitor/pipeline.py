@@ -93,17 +93,23 @@ class PublicOpinionPipeline:
                 time.sleep(self.settings.request_delay_seconds)
 
         processor = NewsDataProcessor()
-        dataframe = processor.to_dataframe(news_items)
-        data_file_path = processor.export_to_excel(dataframe, output_dir, run_time)
+        try:
+            dataframe = processor.to_dataframe(news_items)
+            data_file_path = processor.export_to_excel(dataframe, output_dir, run_time)
+        except Exception as exc:
+            raise RuntimeError(f"数据整理导出阶段失败（{type(exc).__name__}）：{exc}") from exc
 
-        report_generator = LLMReportGenerator(self.settings)
-        report_file_path, core_summary = report_generator.generate_report(
-            dataframe=dataframe,
-            run_time=run_time,
-            start_time=start_time,
-            end_time=end_time,
-            output_dir=output_dir,
-        )
+        try:
+            report_generator = LLMReportGenerator(self.settings)
+            report_file_path, core_summary = report_generator.generate_report(
+                dataframe=dataframe,
+                run_time=run_time,
+                start_time=start_time,
+                end_time=end_time,
+                output_dir=output_dir,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"报告生成阶段失败（{type(exc).__name__}）：{exc}") from exc
 
         dispatcher = EmailDispatcher(self.settings)
         email_sent = False

@@ -10,10 +10,12 @@ from werkzeug.utils import secure_filename
 from opinion_monitor.config import Settings
 from opinion_monitor.logging_utils import setup_logging
 from opinion_monitor.pipeline import PublicOpinionPipeline
+from opinion_monitor.runtime_info import get_app_version
 
 settings = Settings()
 settings.ensure_directories()
 setup_logging(settings.log_dir)
+APP_VERSION = get_app_version(settings.project_root)
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 logger = logging.getLogger(__name__)
@@ -116,6 +118,7 @@ HTML_TEMPLATE = """
       <h1>自动化舆情监测 Agent</h1>
       <p>推荐方式是直接上传一个 Excel 工作簿执行本次监测。系统会自动扫描该工作簿所有 sheet 的 B 列主体名称，并自动跳过“主体名称”“主体”“发行人名称”等常见表头。</p>
       <p class="path">辅助本地路径：{{ default_input_path }}</p>
+      <p class="path">当前版本：{{ app_version }}</p>
     </section>
 
     <div class="grid">
@@ -198,6 +201,7 @@ def index():
     return render_template_string(
         HTML_TEMPLATE,
         default_input_path=str(settings.excel_input_path),
+        app_version=APP_VERSION,
         excel_files=list_local_excel_files(),
         message="",
         message_title="",
@@ -236,11 +240,12 @@ def run_pipeline():
         logger.exception("网页模式执行失败：%s", exc)
         result = None
         message_title = "执行失败"
-        message = str(exc)
+        message = f"{type(exc).__name__}: {exc}"
 
     return render_template_string(
         HTML_TEMPLATE,
         default_input_path=str(settings.excel_input_path),
+        app_version=APP_VERSION,
         excel_files=list_local_excel_files(),
         message=message,
         message_title=message_title,
