@@ -116,6 +116,11 @@ class LLMReportGenerator:
         return first_pass
 
     def _request_report(self, instructions: str, user_input: str) -> str:
+        if self._uses_chat_completions_api():
+            return self._request_chat_completion(instructions, user_input)
+        return self._request_responses_api(instructions, user_input)
+
+    def _request_responses_api(self, instructions: str, user_input: str) -> str:
         payload = {
             "model": self.settings.llm_model,
             "instructions": instructions,
@@ -162,6 +167,55 @@ class LLMReportGenerator:
         if not report_text:
             raise ReportGenerationError("模型返回为空，无法生成舆情分析报告。")
         return report_text
+
+    def _request_chat_completion(self, instructions: str, user_input: str) -> str:
+        payload = {
+            "model": self.settings.llm_model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": user_input},
+            ],
+            "stream": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.settings.openai_api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        try:
+            response = self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                timeout=180,
+            )
+        except requests.RequestException as exc:
+            raise ReportGenerationError(f"调用大模型接口失败：{exc}") from exc
+
+        if not response.ok:
+            error_text = response.text.strip()
+            raise ReportGenerationError(
+                f"大模型接口返回异常（HTTP {response.status_code}）：{error_text[:500]}"
+            )
+
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ReportGenerationError("大模型接口返回的不是合法 JSON。") from exc
+
+        choices = response_payload.get("choices") or []
+        if not choices:
+            raise ReportGenerationError("模型未返回有效 choices，无法生成舆情分析报告。")
+
+        message = choices[0].get("message") or {}
+        content = str(message.get("content") or "").strip()
+        if not content:
+            raise ReportGenerationError("模型返回为空，无法生成舆情分析报告。")
+        return content
+
+    def _uses_chat_completions_api(self) -> bool:
+        model_name = (self.settings.llm_model or "").strip().lower()
+        return "deepseek" in self.base_url.lower() or model_name.startswith("deepseek-")
 
     @staticmethod
     def _normalize_base_url(raw_base_url: str) -> str:
