@@ -59,13 +59,21 @@ class PublicOpinionPipeline:
                 f"已跳过 {len(skipped_entities)} 个疑似债券简称、代码或无效主体，避免浪费搜索配额。"
             )
         if (
-            self.settings.search_provider == "tavily"
+            "tavily" in self.settings.search_providers
             and self.settings.tavily_api_key.startswith("tvly-dev-")
             and searchable_entity_count > 200
         ):
             warnings.append(
                 "当前使用 Tavily 开发 Key 且待搜索主体较多，运行中可能触发限流，建议拆分名单或更换正式 Key。"
             )
+        if "qcc" in self.settings.search_providers or "qichacha" in self.settings.search_providers:
+            warnings.append(
+                "当前搜索链路已包含企查查新闻接口。企查查开放平台通常按次计费，请确认 APPKEY、SecretKey 与账户额度后再批量执行。"
+            )
+            if not self.settings.qcc_app_key or not self.settings.qcc_secret_key:
+                warnings.append(
+                    "企查查新闻接口尚未完全启用：官方调用需要 QCC_APP_KEY 与 QCC_SECRET_KEY。仅填写登录账号或单一 key 通常不足以完成鉴权。"
+                )
         for warning in warnings:
             logger.warning(warning)
 

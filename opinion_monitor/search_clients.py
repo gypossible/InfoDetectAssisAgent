@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
 import time
 import warnings
@@ -38,6 +39,15 @@ def _safe_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _pick_first(data: dict | None, *keys: str) -> object:
+    if not isinstance(data, dict):
+        return None
+    for key in keys:
+        if key in data and data.get(key) not in {None, ""}:
+            return data.get(key)
+    return None
 
 
 def parse_published_at(raw_value: str, end_time: datetime) -> datetime | None:
@@ -230,6 +240,41 @@ def _dedupe_news_items(items: list[NewsItem]) -> list[NewsItem]:
     return unique_items
 
 
+def _flatten_qcc_records(value: object) -> list[dict]:
+    if isinstance(value, list):
+        records: list[dict] = []
+        for item in value:
+            records.extend(_flatten_qcc_records(item))
+        return records
+    if isinstance(value, dict):
+        nested_keys = (
+            "Result",
+            "Items",
+            "Data",
+            "List",
+            "NewsList",
+            "News",
+            "Rows",
+        )
+        for key in nested_keys:
+            nested_value = value.get(key)
+            if isinstance(nested_value, (list, dict)):
+                nested_records = _flatten_qcc_records(nested_value)
+                if nested_records:
+                    return nested_records
+        if _pick_first(
+            value,
+            "Title",
+            "NewsTitle",
+            "Name",
+            "Url",
+            "NewsUrl",
+            "Link",
+        ):
+            return [value]
+    return []
+
+
 class BaseSearchClient(ABC):
     provider_name = "base"
 
@@ -260,6 +305,9 @@ class BaseSearchClient(ABC):
             provider=self.provider_name,
             fetched_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    def is_available(self) -> tuple[bool, str]:
+        return True, ""
 
 
 class BingNewsSearchClient(BaseSearchClient):
@@ -438,6 +486,144 @@ class DuckDuckGoNewsSearchClient(BaseSearchClient):
         return items
 
 
+class QccNewsSearchClient(BaseSearchClient):
+    provider_name = "qcc"
+
+    def is_available(self) -> tuple[bool, str]:
+        if not self.settings.qcc_app_key:
+            return (
+                False,
+                "企查查新闻接口未配置 QCC_APP_KEY。企查查官方开放平台鉴权需要 APPKEY 与 SecretKey。",
+            )
+        if not self.settings.qcc_secret_key:
+            return (
+                False,
+                "企查查新闻接口未配置 QCC_SECRET_KEY。企查查官方开放平台鉴权需要 APPKEY 与 SecretKey。",
+            )
+        return True, ""
+
+    def _build_signature_headers(self) -> dict[str, str]:
+        timespan = str(int(time.time()))
+        raw = (
+            f"{self.settings.qcc_app_key}{timespan}{self.settings.qcc_secret_key}"
+        ).encode("utf-8")
+        token = hashlib.md5(raw).hexdigest().upper()
+        return {"Token": token, "Timespan": timespan}
+
+    def _extract_items_from_payload(
+        self,
+        payload: dict,
+        entity_name: str,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[NewsItem]:
+        raw_records = _flatten_qcc_records(payload.get("Result") or payload)
+        items: list[NewsItem] = []
+        for article in raw_records:
+            published_at = _safe_text(
+                _pick_first(
+                    article,
+                    "PublishDate",
+                    "PubDate",
+                    "Date",
+                    "PublishTime",
+                    "PubTime",
+                    "NewsDate",
+                )
+            )
+            if published_at and not is_within_time_window(published_at, start_time, end_time):
+                continue
+
+            title = _pick_first(article, "Title", "NewsTitle", "Name")
+            url = _pick_first(article, "Url", "NewsUrl", "Link")
+            source = _pick_first(article, "Source", "SourceName", "Media", "SiteName")
+            snippet = _pick_first(
+                article,
+                "Abstract",
+                "Summary",
+                "Content",
+                "Excerpt",
+                "Brief",
+                "Desc",
+            )
+            if not _contains_entity(entity_name, title, snippet, url, source):
+                continue
+
+            items.append(
+                self._build_item(
+                    entity_name=entity_name,
+                    title=title,
+                    url=url,
+                    published_at=published_at,
+                    source=source,
+                    snippet=snippet,
+                )
+            )
+        items = _dedupe_news_items(items)
+        items = _sort_mainland_first(items, self.settings)
+        if self.settings.mainland_source_mode == "only":
+            return [item for item in items if _is_mainland_news_item(item, self.settings)]
+        return items
+
+    def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
+        available, reason = self.is_available()
+        if not available:
+            raise SearchClientError(reason)
+
+        params = {
+            "key": self.settings.qcc_app_key,
+            "searchKey": entity_name,
+            "pageIndex": 1,
+            "pageSize": max(1, min(self.settings.qcc_page_size, self.settings.max_results_per_entity, 20)),
+            "startDate": start_time.astimezone(timezone.utc).strftime("%Y-%m-%d"),
+            "endDate": end_time.astimezone(timezone.utc).strftime("%Y-%m-%d"),
+        }
+
+        last_error: Exception | None = None
+        for attempt in range(self.settings.request_retry_attempts + 1):
+            try:
+                response = self.session.get(
+                    self.settings.qcc_news_endpoint,
+                    headers=self._build_signature_headers(),
+                    params=params,
+                    timeout=self.settings.request_timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                status = _safe_text(payload.get("Status"))
+                if status and status != "200":
+                    message = _safe_text(payload.get("Message")) or "企查查接口返回异常。"
+                    raise SearchClientError(f"企查查新闻接口返回 {status}：{message}")
+                items = self._extract_items_from_payload(payload, entity_name, start_time, end_time)
+                return items[: self.settings.max_results_per_entity]
+            except SearchClientError as exc:
+                last_error = exc
+                if attempt >= self.settings.request_retry_attempts or not _is_retryable_error(exc):
+                    raise
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt >= self.settings.request_retry_attempts or not _is_retryable_error(exc):
+                    raise SearchClientError(f"企查查新闻接口请求失败：{exc}") from exc
+            except ValueError as exc:
+                raise SearchClientError(f"企查查新闻接口返回了无法解析的 JSON：{exc}") from exc
+
+            sleep_seconds = min(
+                self.settings.request_retry_backoff_seconds * (2**attempt),
+                self.settings.request_retry_backoff_max_seconds,
+            )
+            logger.warning(
+                "企查查新闻接口触发临时错误，主体 %s 将在 %.1f 秒后重试 [%s/%s]：%s",
+                entity_name,
+                sleep_seconds,
+                attempt + 1,
+                self.settings.request_retry_attempts,
+                last_error,
+            )
+            time.sleep(sleep_seconds)
+
+        raise SearchClientError(f"企查查新闻接口请求失败：{last_error}")
+
+
 class TavilyNewsSearchClient(BaseSearchClient):
     provider_name = "tavily"
 
@@ -604,8 +790,45 @@ class TavilyNewsSearchClient(BaseSearchClient):
         return match.group(1) if match else ""
 
 
-def build_search_client(settings: Settings) -> BaseSearchClient:
-    provider = settings.search_provider.lower()
+class CompositeSearchClient(BaseSearchClient):
+    provider_name = "composite"
+
+    def __init__(self, settings: Settings, clients: list[BaseSearchClient], provider_names: list[str]) -> None:
+        super().__init__(settings)
+        self.clients = clients
+        self.provider_names = provider_names
+
+    def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
+        combined_items: list[NewsItem] = []
+        errors: list[str] = []
+        successful_provider_count = 0
+
+        for client in self.clients:
+            try:
+                provider_items = client.search(entity_name, start_time, end_time)
+                combined_items.extend(provider_items)
+                successful_provider_count += 1
+            except SearchClientError as exc:
+                provider_label = getattr(client, "provider_name", client.__class__.__name__)
+                logger.warning("来源 %s 抓取主体 %s 失败：%s", provider_label, entity_name, exc)
+                errors.append(f"{provider_label}: {exc}")
+
+        combined_items = _dedupe_news_items(combined_items)
+        if self.settings.mainland_source_mode == "prefer":
+            combined_items = _sort_mainland_first(combined_items, self.settings)
+        elif self.settings.mainland_source_mode == "only":
+            combined_items = [
+                item for item in combined_items if _is_mainland_news_item(item, self.settings)
+            ]
+
+        if combined_items:
+            return combined_items[: self.settings.max_results_per_entity]
+        if successful_provider_count > 0:
+            return []
+        raise SearchClientError("；".join(errors) or "所有搜索来源均不可用。")
+
+
+def _build_single_search_client(provider: str, settings: Settings) -> BaseSearchClient:
     if provider == "tavily":
         return TavilyNewsSearchClient(settings)
     if provider == "bing":
@@ -614,4 +837,36 @@ def build_search_client(settings: Settings) -> BaseSearchClient:
         return SerpApiSearchClient(settings)
     if provider in {"duckduckgo", "ddg"}:
         return DuckDuckGoNewsSearchClient(settings)
-    raise SearchClientError(f"不支持的搜索提供商：{settings.search_provider}")
+    if provider in {"qcc", "qichacha"}:
+        return QccNewsSearchClient(settings)
+    raise SearchClientError(f"不支持的搜索提供商：{provider}")
+
+
+def build_search_client(settings: Settings) -> BaseSearchClient:
+    providers = settings.search_providers
+    if len(providers) == 1:
+        return _build_single_search_client(providers[0], settings)
+
+    clients: list[BaseSearchClient] = []
+    skipped_reasons: list[str] = []
+    for provider in providers:
+        try:
+            client = _build_single_search_client(provider, settings)
+        except SearchClientError as exc:
+            skipped_reasons.append(f"{provider}: {exc}")
+            continue
+        available, reason = client.is_available()
+        if available:
+            clients.append(client)
+        else:
+            skipped_reasons.append(f"{provider}: {reason}")
+
+    if not clients:
+        raise SearchClientError(
+            "未找到可用的搜索来源。"
+            + (f" 跳过原因：{'；'.join(skipped_reasons)}" if skipped_reasons else "")
+        )
+
+    if skipped_reasons:
+        logger.warning("部分搜索来源未启用：%s", "；".join(skipped_reasons))
+    return CompositeSearchClient(settings, clients=clients, provider_names=providers)

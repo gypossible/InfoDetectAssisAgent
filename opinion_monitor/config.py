@@ -113,6 +113,14 @@ class Settings:
     ).strip().lower()
     tavily_chunks_per_source: int = int(os.getenv("TAVILY_CHUNKS_PER_SOURCE", "3"))
 
+    qcc_account: str = os.getenv("QCC_ACCOUNT", "")  # TODO: 请在这里填入企查查开放平台账号（可选，仅用于记录）
+    qcc_app_key: str = os.getenv("QCC_APP_KEY", "")  # TODO: 请在这里填入企查查开放平台 APPKEY
+    qcc_secret_key: str = os.getenv("QCC_SECRET_KEY", "")  # TODO: 请在这里填入企查查开放平台 SecretKey
+    qcc_news_endpoint: str = os.getenv(
+        "QCC_NEWS_ENDPOINT", "https://api.qichacha.com/CompanyNews/SearchNews"
+    )  # TODO: 如需私有化网关，请在这里填入企查查新闻接口地址
+    qcc_page_size: int = int(os.getenv("QCC_PAGE_SIZE", "10"))
+
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")  # TODO: 请在这里填入 OpenAI 或兼容模型 API Key
     openai_base_url: str = os.getenv(
         "OPENAI_BASE_URL", ""
@@ -140,6 +148,11 @@ class Settings:
     @property
     def mainland_source_domains(self) -> list[str]:
         return [item.lower() for item in _split_csv(self.mainland_source_domains_raw)]
+
+    @property
+    def search_providers(self) -> list[str]:
+        providers = [item.lower() for item in _split_csv(self.search_provider)]
+        return providers or ["tavily"]
 
     @property
     def formatted_run_date(self) -> str:

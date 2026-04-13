@@ -15,7 +15,7 @@ services:
       - key: EXCEL_TARGET_COLUMN_LETTER
         value: B
       - key: SEARCH_PROVIDER
-        value: tavily
+        value: tavily,qcc,duckduckgo
       - key: REQUEST_DELAY_SECONDS
         value: "1.5"
       - key: REQUEST_TIMEOUT_SECONDS
@@ -26,6 +26,16 @@ services:
         value: "50"
       - key: TAVILY_API_KEY
         sync: false
+      - key: QCC_ACCOUNT
+        sync: false
+      - key: QCC_APP_KEY
+        sync: false
+      - key: QCC_SECRET_KEY
+        sync: false
+      - key: QCC_NEWS_ENDPOINT
+        value: https://api.qichacha.com/CompanyNews/SearchNews
+      - key: QCC_PAGE_SIZE
+        value: "10"
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_BASE_URL
