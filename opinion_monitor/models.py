@@ -20,11 +20,21 @@ class NewsItem:
 
 
 @dataclass(slots=True)
+class PipelineProgress:
+    percent: int
+    stage: str
+    message: str
+    completed_entities: int = 0
+    total_entities: int = 0
+
+
+@dataclass(slots=True)
 class PipelineResult:
     entity_count: int
     article_count: int
     data_file_path: Path
     report_file_path: Path
+    annotated_data_file_path: Path | None
     email_sent: bool
     searched_entity_count: int = 0
     matched_entity_count: int = 0

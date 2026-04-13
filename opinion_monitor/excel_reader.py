@@ -98,11 +98,20 @@ class ExcelWatchlistReader:
         return column_index_from_string(self.target_column_letter)
 
     def _normalize_entity(self, value: object) -> str:
+        return self.normalize_entity_value(value, self.NORMALIZED_HEADER_CANDIDATES)
+
+    @classmethod
+    def normalize_entity_value(
+        cls,
+        value: object,
+        normalized_header_candidates: set[str] | None = None,
+    ) -> str:
         if value is None:
             return ""
         entity = str(value).replace("\u3000", " ").strip()
         if not entity:
             return ""
-        if entity.casefold() in self.NORMALIZED_HEADER_CANDIDATES:
+        header_candidates = normalized_header_candidates or cls.NORMALIZED_HEADER_CANDIDATES
+        if entity.casefold() in header_candidates:
             return ""
         return entity

@@ -70,6 +70,7 @@ cp .env.example .env
 - `QCC_APP_KEY` / `QCC_SECRET_KEY`：企查查开放平台新闻接口鉴权配置
 - `QCC_ACCOUNT`：企查查开放平台账号（可选，仅作记录）
 - `REQUEST_RETRY_ATTEMPTS` / `REQUEST_RETRY_BACKOFF_SECONDS`：搜索限流后的自动重试与退避配置
+- `ANNOTATED_EXCEL_NEWS_LIMIT`：写回到名单 Excel 的单主体舆情条数，默认 `10`
 - `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `LLM_MODEL`：大模型配置
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD`：发件邮箱 SMTP 配置
 - `EMAIL_RECIPIENTS`：收件人，默认已设置为 `liuguangyuan@natrust.cn`
@@ -132,6 +133,7 @@ python web_app.py
 - 系统会自动跳过明显像债券简称/代码的条目，例如 `20弋阳01`
 - 默认搜索链路支持串联 `Tavily News`、`企查查新闻`、`DuckDuckGo News`
 - 使用 Tavily 时，如命中限流或结果为空，会自动用 DuckDuckGo News 兜底
+- 网页会显示实时执行进度条，完成后可直接下载“写回舆情后的 Excel”
 - 如确需复用本地文件，可在辅助模式中明确选择一个已有 Excel 工作簿
 
 ### 免费公开部署模式（Streamlit）
@@ -177,6 +179,7 @@ streamlit run streamlit_app.py
 
 - `舆情原始数据_YYYYMMDD.xlsx`
 - `每日舆情分析报告_YYYYMMDD.md`
+- `舆情写回名单_YYYYMMDD.xlsx`
 
 日志会写入 `logs/opinion_monitor.log`。
 

@@ -30,9 +30,10 @@ with st.sidebar:
     st.write("1. 上传一个 Excel 工作簿")
     st.write("2. 系统自动扫描所有 Sheet 的 B 列主体")
     st.write("3. 抓取过去一年的舆情并生成报告")
-    st.write("4. 默认优先中国大陆公开新闻与公告站点")
-    st.write("5. 支持串联 Tavily、企查查新闻、DuckDuckGo 等来源")
-    st.write("6. 即使邮件失败，也可以直接下载结果文件")
+    st.write("4. 实时展示执行进度")
+    st.write("5. 默认优先中国大陆公开新闻与公告站点")
+    st.write("6. 支持串联 Tavily、企查查新闻、DuckDuckGo 等来源")
+    st.write("7. 额外生成“写回舆情后的 Excel”供下载")
 
 st.info(
     "部署到云端前，请在平台 Secrets 中填写 Tavily、企查查、DeepSeek/OpenAI 与 SMTP 配置。"
@@ -65,14 +66,29 @@ if st.button("开始分析", type="primary", disabled=uploaded_file is None):
     if uploaded_file is None:
         st.warning("请先上传 Excel 文件。")
     else:
+        progress_bar = st.progress(0, text="任务准备中...")
+        progress_text = st.empty()
+
+        def _on_progress(update) -> None:
+            progress_bar.progress(update.percent, text=update.message)
+            if update.total_entities:
+                progress_text.caption(
+                    f"当前阶段：{update.stage} | 进度：{update.completed_entities}/{update.total_entities}"
+                )
+            else:
+                progress_text.caption(f"当前阶段：{update.stage}")
+
         with st.spinner("正在抓取舆情、生成报告，请稍候..."):
             try:
                 excel_path = _persist_upload(uploaded_file)
                 st.session_state.run_result = PublicOpinionPipeline(settings).run(
-                    excel_source=excel_path
+                    excel_source=excel_path,
+                    progress_callback=_on_progress,
                 )
+                progress_bar.progress(100, text="执行完成，结果文件已生成。")
             except Exception as exc:
                 st.session_state.run_error = f"{type(exc).__name__}: {exc}"
+                progress_bar.progress(100, text="执行失败。")
 
 if st.session_state.run_error:
     st.error(f"执行失败：{st.session_state.run_error}")
@@ -96,11 +112,18 @@ if result is not None:
         st.warning(warning)
     st.code(str(result.data_file_path), language="text")
     st.code(str(result.report_file_path), language="text")
+    if result.annotated_data_file_path is not None:
+        st.code(str(result.annotated_data_file_path), language="text")
 
     data_bytes = Path(result.data_file_path).read_bytes()
     report_bytes = Path(result.report_file_path).read_bytes()
+    annotated_bytes = (
+        Path(result.annotated_data_file_path).read_bytes()
+        if result.annotated_data_file_path is not None
+        else None
+    )
 
-    download_col1, download_col2 = st.columns(2)
+    download_col1, download_col2, download_col3 = st.columns(3)
     with download_col1:
         st.download_button(
             label="下载原始数据 Excel",
@@ -115,6 +138,14 @@ if result is not None:
             file_name=Path(result.report_file_path).name,
             mime="text/markdown",
         )
+    with download_col3:
+        if annotated_bytes is not None:
+            st.download_button(
+                label="下载写回舆情后的 Excel",
+                data=annotated_bytes,
+                file_name=Path(result.annotated_data_file_path).name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
 st.divider()
 st.markdown(

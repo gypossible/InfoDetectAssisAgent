@@ -22,6 +22,8 @@ services:
         value: "20"
       - key: MAX_RESULTS_PER_ENTITY
         value: "10"
+      - key: ANNOTATED_EXCEL_NEWS_LIMIT
+        value: "10"
       - key: MAX_EXCEL_FILES
         value: "50"
       - key: TAVILY_API_KEY

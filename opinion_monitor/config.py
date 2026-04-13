@@ -89,6 +89,7 @@ class Settings:
         os.getenv("REQUEST_RETRY_BACKOFF_MAX_SECONDS", "20")
     )
     max_results_per_entity: int = int(os.getenv("MAX_RESULTS_PER_ENTITY", "10"))
+    annotated_excel_news_limit: int = int(os.getenv("ANNOTATED_EXCEL_NEWS_LIMIT", "10"))
     max_excel_files: int = int(os.getenv("MAX_EXCEL_FILES", "50"))
 
     bing_subscription_key: str = os.getenv("BING_SUBSCRIPTION_KEY", "")  # TODO: 请在这里填入 Bing News Search API Key
