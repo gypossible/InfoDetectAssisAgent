@@ -121,6 +121,9 @@ class Settings:
         "QCC_NEWS_ENDPOINT", "https://api.qichacha.com/CompanyNews/SearchNews"
     )  # TODO: 如需私有化网关，请在这里填入企查查新闻接口地址
     qcc_page_size: int = int(os.getenv("QCC_PAGE_SIZE", "10"))
+    qcc_auto_disable_on_region_block: bool = _as_bool(
+        os.getenv("QCC_AUTO_DISABLE_ON_REGION_BLOCK"), default=True
+    )
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")  # TODO: 请在这里填入 OpenAI 或兼容模型 API Key
     openai_base_url: str = os.getenv(

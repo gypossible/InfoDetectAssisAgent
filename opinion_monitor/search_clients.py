@@ -35,6 +35,10 @@ class SearchClientError(Exception):
     """搜索客户端异常。"""
 
 
+class QccRegionBlockedError(SearchClientError):
+    """企查查因出口 IP 区域限制拒绝请求。"""
+
+
 def _safe_text(value: object) -> str:
     if value is None:
         return ""
@@ -135,6 +139,21 @@ def _is_retryable_error(exc: Exception) -> bool:
         "504",
     )
     return any(marker in message for marker in retryable_markers)
+
+
+def _is_qcc_region_block(status: object, message: object) -> bool:
+    status_text = _safe_text(status)
+    message_text = _safe_text(message)
+    region_markers = (
+        "数据不能出境",
+        "暂不支持境外ip请求",
+        "暂不支持境外 IP 请求",
+        "境外ip",
+        "境外 IP",
+    )
+    if status_text in {"121", "100002"}:
+        return True
+    return any(marker.lower() in message_text.lower() for marker in region_markers)
 
 
 def _bing_freshness(lookback_days: int) -> str | None:
@@ -593,6 +612,8 @@ class QccNewsSearchClient(BaseSearchClient):
                 status = _safe_text(payload.get("Status"))
                 if status and status != "200":
                     message = _safe_text(payload.get("Message")) or "企查查接口返回异常。"
+                    if _is_qcc_region_block(status, message):
+                        raise QccRegionBlockedError(f"企查查新闻接口区域限制 {status}：{message}")
                     raise SearchClientError(f"企查查新闻接口返回 {status}：{message}")
                 items = self._extract_items_from_payload(payload, entity_name, start_time, end_time)
                 return items[: self.settings.max_results_per_entity]
@@ -797,6 +818,7 @@ class CompositeSearchClient(BaseSearchClient):
         super().__init__(settings)
         self.clients = clients
         self.provider_names = provider_names
+        self.disabled_provider_reasons: dict[str, str] = {}
 
     def search(self, entity_name: str, start_time: datetime, end_time: datetime) -> list[NewsItem]:
         combined_items: list[NewsItem] = []
@@ -804,12 +826,25 @@ class CompositeSearchClient(BaseSearchClient):
         successful_provider_count = 0
 
         for client in self.clients:
+            provider_label = getattr(client, "provider_name", client.__class__.__name__)
+            if provider_label in self.disabled_provider_reasons:
+                continue
             try:
                 provider_items = client.search(entity_name, start_time, end_time)
                 combined_items.extend(provider_items)
                 successful_provider_count += 1
+            except QccRegionBlockedError as exc:
+                if self.settings.qcc_auto_disable_on_region_block:
+                    self.disabled_provider_reasons[provider_label] = str(exc)
+                    logger.warning(
+                        "来源 %s 因区域限制在本轮任务中自动停用：%s",
+                        provider_label,
+                        exc,
+                    )
+                    continue
+                logger.warning("来源 %s 抓取主体 %s 失败：%s", provider_label, entity_name, exc)
+                errors.append(f"{provider_label}: {exc}")
             except SearchClientError as exc:
-                provider_label = getattr(client, "provider_name", client.__class__.__name__)
                 logger.warning("来源 %s 抓取主体 %s 失败：%s", provider_label, entity_name, exc)
                 errors.append(f"{provider_label}: {exc}")
 

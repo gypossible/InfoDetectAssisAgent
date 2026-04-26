@@ -130,6 +130,13 @@ class PublicOpinionPipeline:
             if index < searchable_entity_count:
                 time.sleep(self.settings.request_delay_seconds)
 
+        disabled_provider_reasons = getattr(search_client, "disabled_provider_reasons", {})
+        if disabled_provider_reasons:
+            for provider_name, reason in disabled_provider_reasons.items():
+                warnings.append(
+                    f"来源 {provider_name} 已在本轮任务中自动停用：{reason}。系统已继续使用其他可用来源。"
+                )
+
         processor = NewsDataProcessor()
         try:
             self._emit_progress(

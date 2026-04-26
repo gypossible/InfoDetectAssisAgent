@@ -38,6 +38,8 @@ services:
         value: https://api.qichacha.com/CompanyNews/SearchNews
       - key: QCC_PAGE_SIZE
         value: "10"
+      - key: QCC_AUTO_DISABLE_ON_REGION_BLOCK
+        value: "true"
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_BASE_URL
